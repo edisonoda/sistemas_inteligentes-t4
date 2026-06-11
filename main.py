@@ -93,6 +93,22 @@ def dist(a, b=(0, 0)):
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
+def euclidean_route_cost(route, victims_pos, base=(0, 0)):
+    """Calculate total Euclidean distance cost of a route (ignoring obstacles)."""
+    if not route:
+        return 0.0
+    cost = 0.0
+    prev = base
+    for vid in route:
+        coord = victims_pos.get(vid)
+        if coord is None:
+            cost += 1e6
+        else:
+            cost += dist(prev, coord)
+            prev = coord
+    return cost
+
+
 def assign_clusters_greedy(clusters, victims_pos, rescuers, base=(0, 0)):
     # initial potential costs
     pot = {r['NAME']: 0.0 for r in rescuers}
@@ -116,6 +132,10 @@ def main():
     env_config = read_env_config(env_config_path)
     grid_width = env_config.get('GRID_WIDTH', 94)
     grid_height = env_config.get('GRID_HEIGHT', 94)
+    
+    # Load obstacles for cost calculation
+    obst_file = os.path.join('datasets', 'env', '94x94_408v', 'env_obst.txt')
+    sequencer.load_obstacles(obst_file)
     
     # convert base from grid coordinates [0, width-1] to relative coordinates [-(width/2), (width/2)]
     base_grid = env_config.get('BASE', (grid_width // 2, grid_height // 2))
@@ -196,17 +216,22 @@ def main():
         # sequence all members using sequencer
         route = sequencer.sequence_cluster(members_ordered, victims_pos, base=base, iterations=3000, temp0=1.0, cooling=0.995,
                                            cost_line=cost_line, cost_diag=cost_diag)
-        total_cost = sequencer.route_cost(route, victims_pos, base=base, cost_line=cost_line, cost_diag=cost_diag)
+        grid_cost = sequencer.route_cost(route, victims_pos, base=base, cost_line=cost_line, cost_diag=cost_diag)
+        euclidean_cost = euclidean_route_cost(route, victims_pos, base=base)
 
         results[name] = {
             'assigned_clusters': [c['index'] for c in assigned_clusters],
             'route': route,
-            'cost': total_cost
+            'grid_cost': grid_cost,
+            'euclidean_cost': euclidean_cost,
+            'num_victims': len(route)
         }
 
         print(f"\n{name}")
         print(f"- Assigned clusters: {results[name]['assigned_clusters']}")
-        print(f"- Cost: {total_cost:.2f}")
+        print(f"- Num victims: {len(route)}")
+        print(f"- Euclidean distance: {euclidean_cost:.2f}")
+        print(f"- Grid movement cost: {grid_cost:.2f}")
 
         # save route
         out_route = os.path.join('outputs', f'route_{name}.txt')
