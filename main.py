@@ -126,6 +126,43 @@ def assign_clusters_greedy(clusters, victims_pos, rescuers, base=(0, 0)):
     return assigned, pot
 
 
+def save_ordered_clusters(results, clusters, output_dir='clusters_ordered'):
+    # Build a mapping from cluster index to ordered route
+    cluster_routes = {}
+    for rescuer_name, result in results.items():
+        assigned_cluster_indices = result['assigned_clusters']
+        route = result['route']
+        
+        # Partition the route by cluster
+        cluster_idx = 0
+        cluster_members = {i: [] for i in assigned_cluster_indices}
+        
+        # For simplicity, we'll track which victims belong to which cluster
+        # by matching against the original cluster members
+        for victim_id in route:
+            for orig_cluster_idx in assigned_cluster_indices:
+                orig_members = clusters[orig_cluster_idx - 1]['members']
+                if victim_id in orig_members and orig_cluster_idx not in cluster_routes:
+                    if orig_cluster_idx not in cluster_members:
+                        cluster_members[orig_cluster_idx] = []
+                    cluster_members[orig_cluster_idx].append(victim_id)
+        
+        # Simpler approach: just save the entire route ordered by cluster
+        for cluster_idx in assigned_cluster_indices:
+            orig_members = clusters[cluster_idx - 1]['members']
+            # Order these members according to their position in the route
+            ordered_members = [v for v in route if v in orig_members]
+            cluster_routes[cluster_idx] = ordered_members
+    
+    # Write ordered cluster files
+    for cluster_idx, route in cluster_routes.items():
+        fname = f'cluster_{cluster_idx}.txt'
+        fpath = os.path.join(output_dir, fname)
+        with open(fpath, 'w') as f:
+            for victim_id in route:
+                f.write(f'{victim_id}\n')
+
+
 def main():
     # read environment config for base and grid size
     env_config_path = os.path.join('datasets', 'env', '94x94_408v', 'env_config.txt')
@@ -247,6 +284,9 @@ def main():
             ys.append(coord[1])
 
         plt.plot(xs, ys, color=colors[idx % len(colors)], linewidth=1.5, label=f'route_{name}')
+
+    # Save ordered clusters to separate directory
+    save_ordered_clusters(results, clusters, output_dir='clusters_ordered')
 
     plt.legend()
     plt.title('Rescuers routes and map')
