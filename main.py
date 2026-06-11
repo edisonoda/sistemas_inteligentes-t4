@@ -23,6 +23,27 @@ def read_map_local(map_file):
     return victims_list
 
 
+def read_env_config(path):
+    cfg = {}
+    with open(path, 'r') as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            parts = line.split()
+            if not parts:
+                continue
+            key = parts[0]
+            if key == 'BASE':
+                coords = parts[1].split(',')
+                cfg['BASE'] = (int(coords[0]), int(coords[1]))
+            elif key == 'GRID_WIDTH':
+                cfg['GRID_WIDTH'] = int(parts[1])
+            elif key == 'GRID_HEIGHT':
+                cfg['GRID_HEIGHT'] = int(parts[1])
+    return cfg
+
+
 def read_agent_config(path):
     cfg = {}
     with open(path, 'r') as fh:
@@ -72,7 +93,7 @@ def dist(a, b=(0, 0)):
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
-def assign_clusters_greedy(clusters, victims_pos, rescuers):
+def assign_clusters_greedy(clusters, victims_pos, rescuers, base=(0, 0)):
     # initial potential costs
     pot = {r['NAME']: 0.0 for r in rescuers}
     assigned = {r['NAME']: [] for r in rescuers}
@@ -80,7 +101,7 @@ def assign_clusters_greedy(clusters, victims_pos, rescuers):
     for i, cl in enumerate(clusters, start=1):
         members = cl['members']
         centroid = compute_centroid(members, victims_pos)
-        cluster_potential = len(members) * dist(centroid, (0, 0))
+        cluster_potential = len(members) * dist(centroid, base)
         # find rescuer with lowest potential
         best = min(pot.items(), key=lambda x: x[1])[0]
         assigned[best].append({'index': i, 'members': members, 'centroid': centroid, 'potential': cluster_potential})
@@ -89,6 +110,17 @@ def assign_clusters_greedy(clusters, victims_pos, rescuers):
 
 
 def main():
+    # read environment config for base and grid size
+    env_config_path = os.path.join('datasets', 'env', '94x94_408v', 'env_config.txt')
+    env_config = read_env_config(env_config_path)
+    grid_width = env_config.get('GRID_WIDTH', 94)
+    grid_height = env_config.get('GRID_HEIGHT', 94)
+    
+    # convert base from grid coordinates [0, width-1] to relative coordinates [-(width/2), (width/2)]
+    base_grid = env_config.get('BASE', (grid_width // 2, grid_height // 2))
+    center = (grid_width - 1) / 2.0
+    base = (base_grid[0] - center, base_grid[1] - center)
+
     map_file = os.path.join('datasets', 'map', 'map.csv')
     victims_list = read_map_local(map_file)
     victims_pos = {v[0]: (v[1], v[2]) for v in victims_list}
@@ -103,13 +135,17 @@ def main():
         cfg_path = os.path.join(cfg_folder, f'soc_{i}.txt')
         rescuer_cfgs.append(read_agent_config(cfg_path))
 
-    assigned, potentials = assign_clusters_greedy(clusters, victims_pos, rescuer_cfgs)
+    assigned, potentials = assign_clusters_greedy(clusters, victims_pos, rescuer_cfgs, base=base)
 
     os.makedirs('outputs', exist_ok=True)
 
     results = {}
 
     colors = [(1,0,0), (0,0.5,0), (0,0,1)]
+
+    print(f"Base (grid): {base_grid}")
+    print(f"Base (relative): {base}")
+    print()
 
     plt.figure(figsize=(8,8))
     plt.axis('equal')
@@ -140,7 +176,7 @@ def main():
 
     plt.scatter(obst_x, obst_y, c='black', s=4, label='walls')
     plt.scatter(vic_x, vic_y, c='orange', s=6, label='victims')
-    plt.scatter(0, 0, c='red', s=80, marker='s', label='base')
+    plt.scatter(base[0], base[1], c='red', s=80, marker='s', label='base')
 
     # For each rescuer, build all victims list from assigned clusters and sequence them
     for idx, rcfg in enumerate(rescuer_cfgs):
@@ -157,9 +193,9 @@ def main():
         members_ordered = [x for x in all_members if not (x in seen or seen.add(x))]
 
         # sequence all members using sequencer
-        route = sequencer.sequence_cluster(members_ordered, victims_pos, base=(0,0), iterations=3000, temp0=1.0, cooling=0.995,
+        route = sequencer.sequence_cluster(members_ordered, victims_pos, base=base, iterations=3000, temp0=1.0, cooling=0.995,
                                            cost_line=cost_line, cost_diag=cost_diag)
-        total_cost = sequencer.route_cost(route, victims_pos, base=(0,0), cost_line=cost_line, cost_diag=cost_diag)
+        total_cost = sequencer.route_cost(route, victims_pos, base=base, cost_line=cost_line, cost_diag=cost_diag)
 
         results[name] = {
             'assigned_clusters': [c['index'] for c in assigned_clusters],
@@ -177,10 +213,10 @@ def main():
             fh.write('\n'.join(str(v) for v in route))
 
         # draw route on plot
-        xs = [0]
-        ys = [0]
+        xs = [base[0]]
+        ys = [base[1]]
         for id in route:
-            coord = victims_pos.get(id, (0,0))
+            coord = victims_pos.get(id, base)
             xs.append(coord[0])
             ys.append(coord[1])
 

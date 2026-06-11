@@ -21,8 +21,8 @@ def route_cost(route: List[int], pos: Dict[int, Tuple[float, float]], base=(0, 0
         return 0.0
     cost = 0.0
     prev = base
-    for vid in route:
-        coord = pos.get(vid)
+    for id in route:
+        coord = pos.get(id)
         if coord is None:
             # if missing position, add a large penalty
             cost += 1e6
@@ -49,15 +49,15 @@ def sequence_cluster(cluster_ids: List[int], victims_pos: Dict[int, Tuple[float,
     while remaining:
         best = None
         best_d = float('inf')
-        for vid in list(remaining):
-            coord = victims_pos.get(vid)
+        for id in list(remaining):
+            coord = victims_pos.get(id)
             if coord is None:
                 d = float('inf')
             else:
                 d = move_cost(curr, coord, cost_line, cost_diag)
             if d < best_d:
                 best_d = d
-                best = vid
+                best = id
         route.append(best)
         remaining.remove(best)
         curr = victims_pos.get(best, curr)
