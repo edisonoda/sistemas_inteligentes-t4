@@ -42,6 +42,7 @@ class Rescuer(AbstAgent):
         self.rescuers = []          # list of all rescuers
         self.assigned_clusters = []  # clusters assigned to this rescuer
         self.potential_cost = 0.0    # assigned cluster cost accumulator
+        self.estimated_trajectory_cost = 0.0
                 
         # Starts in IDLE state.
         # It changes to ACTIVE when the map arrives
@@ -92,11 +93,13 @@ class Rescuer(AbstAgent):
             self._save_ordered_cluster(cluster["file"], ordered)
 
         self.plan = self._build_plan_from_targets(ordered_victim_ids, victims_pos, base)
+        self.estimated_trajectory_cost = self._estimate_euclidean_path_cost(ordered_victim_ids, victims_pos, base)
 
         if not self.plan:
             print(f"{self.NAME}: no valid rescue plan could be built")
         else:
             print(f"{self.NAME}: plan ready with {len(self.plan)} steps")
+            print(f"{self.NAME}: estimated euclidean trajectory cost {self.estimated_trajectory_cost:.2f}")
 
     def merge_maps(self, exp_name, map, victims):
         """ The explorer named exp_name sends the map containing the walls and
@@ -346,3 +349,18 @@ class Rescuer(AbstAgent):
                 current = step
 
         return plan
+
+    def _estimate_euclidean_path_cost(self, target_ids, positions, base):
+        cost = 0.0
+        current = base
+        for vid in target_ids:
+            target = positions.get(vid)
+            if target is None:
+                continue
+            cost += math.hypot(target[0] - current[0], target[1] - current[1])
+            current = target
+
+        if current != base:
+            cost += math.hypot(base[0] - current[0], base[1] - current[1])
+
+        return cost

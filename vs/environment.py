@@ -370,11 +370,15 @@ class Env:
                 sobr.append(self.sobr[v])
                 tot_sobr = tot_sobr + self.sobr[v]
 
-            print(f"\n{idents}{type_str} victims: (ID, Tri, Sobr)")
-            for i in range(len(victims)):
-                if (i % 4 == 0):
-                    print("")
-                print(f"{idents}({victims[i]:d}, {tri[i]:d}, {sobr[i]:.1f})", end=' ')
+            avg_sobr = tot_sobr / len(sobr) if sobr else 0.0
+            variance = sum((value - avg_sobr) ** 2 for value in sobr) / len(sobr) if sobr else 0.0
+            std_sobr = math.sqrt(variance)
+
+            # print(f"\n{idents}{type_str} victims: (ID, Tri, Sobr)")
+            # for i in range(len(victims)):
+            #     if (i % 4 == 0):
+            #         print("")
+            #     print(f"{idents}({victims[i]:d}, {tri[i]:d}, {sobr[i]:.1f})", end=' ')
 
             print("\n")
             if self.tri.count(0) > 0:
@@ -392,6 +396,8 @@ class Env:
                         (3*self.tri.count(0)+3*self.tri.count(1)+3*self.tri.count(2)+self.tri.count(3)))
 
             print(f"{idents}Weighted {type_str} victims per sobr (V{sub}g) = {weighted:.2f}\n")
+            print(f"{idents}Average sobr for {type_str} victims = {avg_sobr:.2f}")
+            print(f"{idents}Sobr std deviation for {type_str} victims = {std_sobr:.2f}")
             print(f"{idents}Sum of sobr of all {type_str} victims = {tot_sobr:.2f} of a total of {self.sum_sobr:.2f}")
             print(f"{idents}  % of sobr of all {type_str} victims = {tot_sobr/self.sum_sobr:.2f}")
             print(f"{idents}--------------------------------------")
