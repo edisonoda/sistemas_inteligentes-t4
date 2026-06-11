@@ -5,143 +5,111 @@
 ### to the base when it enters into a dead end position
 
 
-from vs.abstract_agent import AbstAgent
 from vs.constants import VS
-from map import Map
+
+# Sequencing helper (simulated annealing implementation)
+import glob
+import os
+import sequencer
 
 
-## Classe que define o Agente Rescuer com um plano fixo
-class Rescuer(AbstAgent):
-    def __init__(self, env, config_file):
-        """ 
-        @param env: a reference to an instance of the environment class
-        @param config_file: the absolute path to the agent's config file"""
-
-        super().__init__(env, config_file)
-
+class Rescuer():
+    def __init__(self, config_file):
         # Specific initialization for the rescuer
-        self.map = Map()            # only SOC_1 has all maps (it is the master)
         self.victims = {}           # list of found victims
-        self.plan = []              # a list of planned actions
-        self.plan_x = 0             # the x position of the rescuer during the planning phase
-        self.plan_y = 0             # the y position of the rescuer during the planning phase
-        self.plan_visited = set()   # positions already planned to be visited 
-        self.plan_rtime = self.TLIM # the remaing time during the planning phase
-        self.plan_walk_time = 0.0   # previewed time to walk during rescue
         self.x = 0                  # the current x position of the rescuer when executing the plan
         self.y = 0                  # the current y position of the rescuer when executing the plan
-        self.explorers_remaining = {"EXP_1", "EXP_2", "EXP_3"} # control explorers
-        self.rescuers = []          # list of all rescuers
-                
-        # Starts in IDLE state.
-        # It changes to ACTIVE when the map arrives
-        self.set_state(VS.IDLE)
+        self.rescuers = []          # list of all rescuersself.NAME = ""     # public: the name of the agent
+        self.TLIM = 0.0    # public: time limit to execute (cannot be exceeded)
+        self.COST_LINE = 0.0        # public: basic cost to walk one step hor or vertically
+        self.COST_DIAG = 0.0        # public: basic cost to walk one step diagonally
+        self.COST_READ = 0.0        # public: basic cost to read a victim's vital sign
+        self.COST_FIRST_AID = 0.0   # public: basic cost to drop the first aid package to a victim
+        self.COLOR = (100, 100, 100)       # public: color of the agent
+        self.TRACE_COLOR = (140, 140, 140) # public: color for the visited cells
+        # stores the folder where the agents' config files are
+        self.config_folder = os.path.dirname(config_file)     
+
+        # Read agents config file for controlling time
+        with open(config_file, "r") as file:
+
+            # Read each line of the file
+            for line in file:
+                # Split the line into words
+                words = line.split()
+
+                # Get the keyword and value
+                keyword = words[0]
+                if keyword == "NAME":
+                    self.NAME = words[1]
+                elif keyword == "COLOR":
+                    r = int(words[1].strip('(), '))
+                    g = int(words[2].strip('(), '))
+                    b = int(words[3].strip('(), '))
+                    self.COLOR = (r, g, b)  # a tuple
+                elif keyword == "TRACE_COLOR":
+                    r = int(words[1].strip('(), '))
+                    g = int(words[2].strip('(), '))
+                    b = int(words[3].strip('(), '))
+                    self.TRACE_COLOR = (r, g, b)  # a tuple
+                elif keyword == "TLIM":
+                    self.TLIM = float(words[1])
+                elif keyword == "COST_LINE":
+                    self.COST_LINE = float(words[1])
+                elif keyword == "COST_DIAG":
+                    self.COST_DIAG = float(words[1])
+                elif keyword == "COST_FIRST_AID":
+                    self.COST_FIRST_AID = float(words[1])
+                elif keyword == "COST_READ":
+                    self.COST_READ = float(words[1])
 
     def set_rescuers(self, rescuers_lst):
         """ each rescuer has the reference to the others"""
         self.rescuers = rescuers_lst
         
     def do_rescue(self, map, clusters):
-        """ O agente socorrista executa a estratégia de salvamento tendo
-            o mapa e os clusters que foram atribuídos a ele.
-        """
-        # It changes to ACTIVE when the map arrives
-        self.set_state(VS.ACTIVE)
-        
-        print(f"{self.NAME}: socorrista planeja o socorro...")
-        print(f"{self.NAME}: que consiste fazer uma lista de ações e...")
-        print(f"{self.NAME}: salvá-las em self.plan. No método deliberate,")
-        print(f"{self.NAME}: o socorrista executa uma ação do plano por chamada.")
-        
+        # Load victim positions from map.csv (produced by explorers)
+        map_file = os.path.join('.', 'map.csv')
+        victims_list = []
+        if os.path.exists(map_file):
+            # import read_map lazily to avoid importing heavy libs at module import time
+            from t3.main import read_map
+            victims_list = read_map(map_file)
 
+        victims_pos = {v[0]: (v[1], v[2]) for v in victims_list}
 
-        
-    def merge_maps(self, exp_name, map, victims):
-        """ The explorer named exp_name sends the map containing the walls and
-        victims' location. The rescuer becomes ACTIVE. From now,
-        the deliberate method is called by the environment"""
-
-        # Merge received map directly into self.map
-        # Merge all visited coordinates from this explorer into self.map
-        for coord, cell_data in map.map_data.items():  
-            # Since each explorer contributes visited cells,
-            # simply add coordinates not yet present
-            if not self.map.in_map(coord):
-                difficulty, victim_seq, actions_res = cell_data
-                self.map.add(coord, difficulty, victim_seq, actions_res)
-    
-        print(f"{self.NAME}: Map received from explorer {exp_name}")
-
-        # Merge found victims
-        #print()
-        #print(f"{self.NAME} Found victs by {exp_name}: {victims}")
-        self.victims.update(victims)
-        #print(f"{self.NAME} Updated victs: {self.victims}")
-        
-        # Mark this explorer as received
-        self.explorers_remaining.discard(exp_name)
-
-        if self.explorers_remaining:
-            print(f"{self.NAME}: Waiting for remaining explorers... {self.explorers_remaining}")
+        # Read cluster files and assign clusters to this rescuer by round-robin
+        cluster_files = sorted(glob.glob(os.path.join('.', 'clusters', 'cluster_*.txt')))
+        if not cluster_files:
+            print(f"{self.NAME}: No cluster files found in clusters/ directory.")
             return
+
+        # derive rescuer index from NAME (SOC_1 -> 0)
+        try:
+            idx = int(self.NAME.split('_')[-1]) - 1
+        except Exception:
+            idx = 0
+
+        for i, fname in enumerate(cluster_files, start=1):
+            # assign cluster i to rescuer idx when (i-1) % 3 == idx
+            if (i - 1) % 3 != idx:
+                continue
+
+            with open(fname, 'r') as fh:
+                cluster_ids = [int(line.strip()) for line in fh if line.strip()]
+
+            if not cluster_ids:
+                print(f"{self.NAME}: cluster file {fname} is empty, skipping.")
+                continue
+
+            print(f"{self.NAME}: Sequencing cluster {i} with {len(cluster_ids)} victims...")
+
+            ordered = sequencer.sequence_cluster(cluster_ids, victims_pos)
+
+            # Overwrite the cluster file with the ordered victim ids (one per line)
+            with open(fname, 'w') as fh:
+                for vid in ordered:
+                    fh.write(f"{vid}\n")
+
+            print(f"{self.NAME}: Wrote ordered cluster to {fname}")
         
-        # print the merged map
-        self.map.draw()
-        
-        # print the found victims by all explorers - you may comment out
-        #for seq, data in self.victims.items():
-        #    coord, vital_signals = data
-        #    x, y = coord
-        #    print(f"{self.NAME} Victim {seq} at ({x}, {y}) vs: {vital_signals}")
-
-        ##################
-        ### CLUSTERING ###
-        ##################
-        # O agente socorrista mestre faz o clustering
-        clusters = []
-        
-        #####################
-        ### SEND CLUSTERS ###
-        #####################
-        # Send map and cluster to the other rescuer agents
-        for i in range(3):
-            self.rescuers[i].do_rescue(self.map, clusters)
-            
-        
-    def deliberate(self) -> bool:
-        """ This is the choice of the next action. The simulator calls this
-        method at each reasonning cycle if the agent is ACTIVE.
-        Must be implemented in every agent
-        @return True: there's one or more actions to do
-        @return False: there's no more action to do """
-
-        # No more actions to do
-        if self.plan == []:  # empty list, no more actions to do
-           print(f"{self.NAME} has finished the plan")
-           return False
-
-        # Takes the first action of the plan (walk action) and removes it from the plan
-        dx, dy, there_is_vict = self.plan.pop(0)
-        #print(f"{self.NAME} pop dx: {dx} dy: {dy} vict: {there_is_vict}")
-
-        # Walk - just one step per deliberation
-        walked = self.walk(dx, dy)
-
-        # Rescue the victim at the current position
-        if walked == VS.EXECUTED:
-            self.x += dx
-            self.y += dy
-            #print(f"{self.NAME} Walk ok - Rescuer at position ({self.x}, {self.y})")
-            # check if there is a victim at the current position
-            if there_is_vict:
-                rescued = self.first_aid() # True when rescued
-                if rescued:
-                    print(f"{self.NAME} Victim rescued at ({self.x}, {self.y})")
-                else:
-                    print(f"{self.NAME} Plan fail - victim not found at ({self.x}, {self.x})")
-        else:
-            print(f"{self.NAME} Plan fail - walk error - agent at ({self.x}, {self.x})")
-            
-        #input(f"{self.NAME} remaining time: {self.get_rtime()} Tecle enter")
-
-        return True
