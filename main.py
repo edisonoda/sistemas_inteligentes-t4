@@ -101,7 +101,8 @@ def assign_clusters_greedy(clusters, victims_pos, rescuers, base=(0, 0)):
     for i, cl in enumerate(clusters, start=1):
         members = cl['members']
         centroid = compute_centroid(members, victims_pos)
-        cluster_potential = len(members) * dist(centroid, base)
+        # potential: number of victims (primary) + 0.5 * distance (secondary, reduced weight)
+        cluster_potential = len(members) + 0.5 * dist(centroid, base)
         # find rescuer with lowest potential
         best = min(pot.items(), key=lambda x: x[1])[0]
         assigned[best].append({'index': i, 'members': members, 'centroid': centroid, 'potential': cluster_potential})
